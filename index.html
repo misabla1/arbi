@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Árbitro Implacable</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0; height: 100%; background: #0b1a10; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 8px;
+  }
+  canvas {
+    display: block; border-radius: 6px;
+    box-shadow: 0 0 0 4px #000, 0 10px 40px rgba(0,0,0,.6);
+  }
+  #touch { display: none; width: 100%; max-width: 600px; justify-content: space-between; padding: 0 12px; box-sizing: border-box; }
+  body.touch #touch { display: flex; }
+  #touch .grp { display: flex; gap: 10px; }
+  #touch button {
+    width: 72px; height: 72px; border-radius: 16px; border: 3px solid #000;
+    background: #26422e; color: #fff; font: 22px "Press Start 2P", monospace;
+    box-shadow: 0 5px 0 #000; touch-action: none;
+  }
+  #touch button.on { transform: translateY(4px); box-shadow: 0 1px 0 #000; }
+  #touch button.card { position: relative; }
+  #touch button.card::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 36px; transform: translate(-50%,-50%) rotate(-12deg);
+    border: 2px solid #fff; border-radius: 3px;
+  }
+  #touch button.y::after { background: #ffd60a; }
+  #touch button.r::after { background: #e3121b; }
+  #touch button.pause { width: 48px; font-size: 12px; }
+
+  #stage { position: relative; }
+  #nameBox {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); border-radius: 6px;
+  }
+  #nameBox.show { display: flex; }
+  #nameBox form {
+    width: min(86%, 420px); padding: 26px 22px 24px; box-sizing: border-box;
+    background: #10261a; border: 4px solid #000; border-radius: 12px;
+    box-shadow: 0 0 0 3px #ffd60a, 0 12px 40px rgba(0,0,0,.6);
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+    font-family: "Press Start 2P", monospace; color: #fff; text-align: center;
+  }
+  #nameBox h2 { margin: 0; font-size: 16px; line-height: 1.6; color: #ffd60a; text-shadow: 3px 3px 0 #000; font-weight: normal; }
+  #nameBox p { margin: 0; font-size: 9px; line-height: 1.7; color: #aaa; }
+  #nameBox input {
+    width: 100%; box-sizing: border-box; padding: 14px 10px;
+    font: 16px "Press Start 2P", monospace; text-transform: uppercase; text-align: center;
+    color: #fff; background: #000; border: 3px solid #fff; border-radius: 8px; outline: none;
+    user-select: text; -webkit-user-select: text;
+  }
+  #nameBox input:focus { border-color: #ffd60a; }
+  #nameBox input.error { border-color: #e3121b; animation: shake .3s; }
+  @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  #nameBox button {
+    padding: 14px 22px; font: 13px "Press Start 2P", monospace; cursor: pointer;
+    color: #000; background: #ffd60a; border: 3px solid #000; border-radius: 8px; box-shadow: 0 5px 0 #000;
+  }
+  #nameBox button:active { transform: translateY(4px); box-shadow: 0 1px 0 #000; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="nameBox">
+      <form id="nameForm" autocomplete="off">
+        <h2>¿QUIÉN<br>ARBITRA?</h2>
+        <input id="nameInput" maxlength="12" placeholder="TU NOMBRE" spellcheck="false" autocapitalize="characters">
+        <button type="submit">¡A JUGAR!</button>
+        <p>Tu puntuación entrará<br>en el ranking</p>
+      </form>
+    </div>
+  </div>
+  <div id="touch">
+    <div class="grp">
+      <button data-k="left">◀</button>
+      <button data-k="right">▶</button>
+    </div>
+    <div class="grp">
+      <button data-k="pause" class="pause">II</button>
+      <button data-k="yellow" class="card y"></button>
+      <button data-k="red" class="card r"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+// =====================================================================
+//  CONFIGURACIÓN — lo único que necesitas tocar
+// =====================================================================
+// Mete tus fotos en la carpeta "img/" y añádelas aquí.
+// Vale solo la ruta, o un objeto con nombre (sale en pantalla al expulsarlo).
+// Las fotos se recortan en círculo desde el centro: mejor si son cuadradas
+// y con la cara centrada. Si la lista está vacía se usan caras dibujadas.
+const FOTOS = [
+  'img/cara01.jpg',
+  'img/cara02.jpg',
+  'img/cara03.jpg',
+  'img/cara04.jpg',
+  'img/cara05.jpg',
+  'img/cara06.jpg',
+  'img/cara07.jpg',
+  'img/cara08.jpg',
+  'img/cara09.jpg',
+  'img/cara10.jpg',
+  'img/cara11.jpg',
+  // Para que salga su nombre al expulsarlo: { src: 'img/cara01.jpg', nombre: 'Paco' },
+];
+const TITULO = 'ÁRBITRO IMPLACABLE';
+
+// Lo que dicen las caras al ser expulsadas (se elige una al azar)
+const FRASES = [
+  '¡Árbitro, qué malo eres!',
+  '¡Paquete!',
+  '¡Que no te enteras!',
+  '¡A ver qué pitas!',
+  '¡Ponte gafas!',
+];
+// Si es true, además del bocadillo las frases se dicen en voz alta
+const VOZ = true;
+
+// Ranking online compartido (Supabase). Pega aquí la URL del proyecto y la
+// clave pública (Project Settings → API Keys → "Publishable key").
+// Si se dejan vacías, el ranking se guarda solo en este navegador.
+const SUPABASE_URL = 'https://wlkprmjuqnfsqvpcjbfw.supabase.co';   // ej: 'https://abcdefghijk.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_J11xQVi7Rwh_XUJbU5_FGQ_-wrkNPjR';   // ej: 'sb_publishable_...'
+// =====================================================================
+
+const W = 600, H = 800, TAU = Math.PI * 2;
+const GROUND = H - 34;
+const HUD_H = 58;
+const FONT = '"Press Start 2P", monospace';
+const SKIN = '#e7b98f';
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let K = 1; // escala interna de render
+
+// ---------- Fotos ----------
+const caras = [];
+FOTOS.forEach(f => {
+  const src = typeof f === 'string' ? f : f.src;
+  const nombre = typeof f === 'string' ? null : (f.nombre || null);
+  const img = new Image();
+  img.onload = () => caras.push({ img, nombre });
+  img.onerror = () => console.warn('No se pudo cargar la foto:', src);
+  img.src = src;
+});
+
+// =====================================================================
+//  AUDIO — música chiptune y efectos generados con Web Audio
+// =====================================================================
+const Sound = (() => {
+  let ac = null, master, musicGain, sfxGain, noiseBuf;
+  let muted = false, playing = false, timer = null;
+  let nextTime = 0, step = 0, tempo = 140;
+
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  function init() {
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    master = ac.createGain(); master.gain.value = muted ? 0 : 0.8; master.connect(ac.destination);
+    musicGain = ac.createGain(); musicGain.gain.value = 0.45; musicGain.connect(master);
+    sfxGain = ac.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+
+  function tone({ type = 'square', f, f2, t, dur, vol = 0.2, out }) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(out || sfxGain);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  function noise({ t, dur, vol = 0.3, freq = 3000, freq2, type = 'lowpass', out }) {
+    const s = ac.createBufferSource(); s.buffer = noiseBuf;
+    const fl = ac.createBiquadFilter(); fl.type = type;
+    fl.frequency.setValueAtTime(freq, t);
+    if (freq2) fl.frequency.exponentialRampToValueAtTime(freq2, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(fl); fl.connect(g); g.connect(out || sfxGain);
+    s.start(t, Math.random() * 0.4); s.stop(t + dur + 0.05);
+  }
+
+  function whistle(t, dur, vol = 0.16) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 2900;
+    const lfo = ac.createOscillator(); lfo.frequency.value = 38;
+    const lg = ac.createGain(); lg.gain.value = 180;
+    lfo.connect(lg); lg.connect(o.frequency);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.setValueAtTime(vol, t + Math.max(0.02, dur - 0.04));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(sfxGain);
+    o.start(t); lfo.start(t); o.stop(t + dur + 0.02); lfo.stop(t + dur + 0.02);
+    noise({ t, dur, vol: 0.03, freq: 3000, type: 'bandpass' });
+  }
+
+  // ---- Música: progresión Am - F - C - G, bucle de 8 compases ----
+  const CHORDS = [
+    { bass: 45, arp: [69, 72, 76] }, // Am
+    { bass: 41, arp: [69, 72, 77] }, // F
+    { bass: 48, arp: [72, 76, 79] }, // C
+    { bass: 43, arp: [71, 74, 79] }, // G
+  ];
+  const MELODY = {};
+  [
+    // Parte A
+    [0,76,2],[2,74,1],[3,72,1],[4,74,2],[6,76,2],[8,81,3],[11,79,1],[12,76,4],
+    [16,77,2],[18,76,1],[19,74,1],[20,72,2],[22,74,2],[24,76,4],[28,72,2],[30,69,2],
+    [32,72,2],[34,74,1],[35,76,1],[36,79,2],[38,76,2],[40,84,3],[43,83,1],[44,79,4],
+    [48,79,2],[50,81,1],[51,79,1],[52,76,2],[54,74,2],[56,71,2],[58,74,2],[60,79,4],
+    // Parte B
+    [64,81,1],[65,81,1],[66,79,1],[67,81,1],[68,84,2],[70,81,2],[72,79,2],[74,76,2],[76,79,2],[78,76,2],
+    [80,77,2],[82,81,2],[84,84,2],[86,81,2],[88,77,4],[92,76,2],[94,72,2],
+    [96,79,1],[97,79,1],[98,76,1],[99,79,1],[100,84,2],[102,83,2],[104,79,2],[106,76,2],[108,72,4],
+    [112,74,2],[114,79,2],[116,83,2],[118,86,2],[120,83,6],[126,81,1],[127,83,1],
+  ].forEach(([s, m, l]) => MELODY[s] = [m, l]);
+
+  function playStep(s, t) {
+    const sd = 60 / tempo / 4;
+    const bar = Math.floor(s / 16) % 4;
+    const ch = CHORDS[bar];
+    const inBar = s % 16;
+    const mel = MELODY[s];
+    if (mel) tone({ type: 'square', f: mtof(mel[0]), t, dur: mel[1] * sd * 0.92, vol: 0.11, out: musicGain });
+    if (s % 2 === 0) {
+      const n = ch.bass + (s % 4 === 2 ? 12 : 0);
+      tone({ type: 'triangle', f: mtof(n), t, dur: sd * 1.7, vol: 0.32, out: musicGain });
+    }
+    tone({ type: 'square', f: mtof(ch.arp[s % 3]), t, dur: sd * 0.7, vol: 0.03, out: musicGain });
+    if (inBar === 0 || inBar === 6 || inBar === 8 || inBar === 10)
+      tone({ type: 'sine', f: 160, f2: 45, t, dur: 0.16, vol: 0.55, out: musicGain });
+    if (inBar === 4 || inBar === 12) {
+      noise({ t, dur: 0.13, vol: 0.22, freq: 1500, type: 'highpass', out: musicGain });
+      tone({ type: 'triangle', f: 220, f2: 120, t, dur: 0.06, vol: 0.12, out: musicGain });
+    }
+    if (s % 2 === 1) noise({ t, dur: 0.03, vol: 0.06, freq: 7000, type: 'highpass', out: musicGain });
+  }
+
+  function scheduler() {
+    while (nextTime < ac.currentTime + 0.12) {
+      playStep(step, nextTime);
+      nextTime += 60 / tempo / 4;
+      step = (step + 1) % 128;
+    }
+  }
+
+  const now = () => ac.currentTime;
+  const ok = () => !!ac;
+
+  return {
+    init,
+    get muted() { return muted; },
+    toggleMute() {
+      muted = !muted;
+      if (master) master.gain.setTargetAtTime(muted ? 0 : 0.8, ac.currentTime, 0.02);
+    },
+    startMusic() {
+      if (!ok() || playing) return;
+      playing = true; step = 0; nextTime = ac.currentTime + 0.6;
+      timer = setInterval(scheduler, 25);
+    },
+    stopMusic() { playing = false; clearInterval(timer); },
+    setTempo(bpm) { tempo = bpm; },
+    suspend() { if (ok()) ac.suspend(); },
+    resume() { if (ok()) ac.resume(); },
+    sfx: {
+      throwYellow() { if (!ok()) return; const t = now();
+        tone({ type: 'square', f: 500, f2: 1400, t, dur: 0.09, vol: 0.09 });
+        noise({ t, dur: 0.08, vol: 0.07, freq: 4000, type: 'highpass' }); },
+      throwRed() { if (!ok()) return; const t = now();
+        tone({ type: 'sawtooth', f: 200, f2: 1000, t, dur: 0.15, vol: 0.11 });
+        noise({ t, dur: 0.12, vol: 0.1, freq: 2500, type: 'bandpass' }); },
+      yellowHit() { if (!ok()) return; const t = now();
+        tone({ type: 'square', f: 988, t, dur: 0.07, vol: 0.13 });
+        tone({ type: 'square', f: 1319, t: t + 0.07, dur: 0.1, vol: 0.13 }); },
+      destroy() { if (!ok()) return; const t = now();
+        noise({ t, dur: 0.4, vol: 0.45, freq: 3000, freq2: 200 });
+        tone({ type: 'square', f: 420, f2: 50, t, dur: 0.35, vol: 0.16 });
+        [72, 76, 79, 84].forEach((m, i) => tone({ type: 'square', f: mtof(m + 12), t: t + 0.05 + i * 0.045, dur: 0.08, vol: 0.07 })); },
+      lifeLost() { if (!ok()) return; const t = now();
+        tone({ type: 'sawtooth', f: 440, f2: 70, t, dur: 0.6, vol: 0.18 });
+        noise({ t, dur: 0.3, vol: 0.15, freq: 800 }); },
+      levelUp() { if (!ok()) return; const t = now();
+        [60, 64, 67, 72, 76, 79].forEach((m, i) => tone({ type: 'square', f: mtof(m + 12), t: t + i * 0.06, dur: 0.1, vol: 0.11 })); },
+      redGain() { if (!ok()) return; const t = now();
+        tone({ type: 'square', f: mtof(84), t, dur: 0.08, vol: 0.1 });
+        tone({ type: 'square', f: mtof(91), t: t + 0.08, dur: 0.15, vol: 0.1 }); },
+      empty() { if (!ok()) return; tone({ type: 'square', f: 110, t: now(), dur: 0.12, vol: 0.12 }); },
+      kickoff() { if (!ok()) return; whistle(now() + 0.05, 0.55); },
+      finalWhistle() { if (!ok()) return; const t = now();
+        whistle(t, 0.3); whistle(t + 0.45, 0.3); whistle(t + 0.9, 0.9);
+        [67, 64, 60, 55].forEach((m, i) => tone({ type: 'square', f: mtof(m), t: t + 2 + i * 0.22, dur: i === 3 ? 0.7 : 0.2, vol: 0.12 })); },
+    },
+  };
+})();
+
+// =====================================================================
+//  ESTADO DEL JUEGO
+// =====================================================================
+// =====================================================================
+//  VOZ — las caras protestan en voz alta (síntesis de voz del navegador)
+// =====================================================================
+const Voz = (() => {
+  const synth = window.speechSynthesis;
+  let voces = [];
+  function cargar() {
+    if (!synth) return;
+    const todas = synth.getVoices().filter(v => /^es/i.test(v.lang));
+    const espana = todas.filter(v => /es[-_]ES/i.test(v.lang));
+    voces = espana.concat(todas.filter(v => !espana.includes(v)));
+  }
+  if (synth) { cargar(); synth.onvoiceschanged = cargar; }
+  return {
+    decir(texto) {
+      if (!VOZ || !synth || Sound.muted) return;
+      try {
+        synth.cancel();
+        const u = new SpeechSynthesisUtterance(texto.replace(/[¡!]/g, ''));
+        u.lang = 'es-ES';
+        if (voces.length) u.voice = voces[Math.floor(Math.random() * Math.min(voces.length, 3))];
+        u.rate = rand(1.05, 1.3);
+        u.pitch = rand(0.7, 1.5); // cada protesta con un tono distinto
+        synth.speak(u);
+      } catch (e) {}
+    },
+    callar() { if (synth) synth.cancel(); },
+  };
+})();
+
+// =====================================================================
+//  RANKING — se guarda en el navegador (top 10)
+// =====================================================================
+const RANK_KEY = 'arbitro_ranking';
+const PEND_KEY = 'arbitro_pendientes';
+const lsGet = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+
+let rankLocal = lsGet(RANK_KEY, []);
+if (!Array.isArray(rankLocal)) rankLocal = [];
+rankLocal = rankLocal.filter(e => e && typeof e.nombre === 'string' && typeof e.puntos === 'number');
+
+let rankOnline = null;      // top 10 global (null = todavía no cargado)
+let netState = 'local';     // local | cargando | ok | error
+const shownRanking = () => rankOnline || rankLocal;
+const isOnlineRanking = () => !!rankOnline;
+const bestScore = () => { const r = shownRanking(); return r.length ? r[0].puntos : 0; };
+let best = bestScore();
+
+let jugador = '';
+try { jugador = localStorage.getItem('arbitro_jugador') || ''; } catch (e) {}
+
+function saveLocal(entry) {
+  rankLocal.push(entry);
+  rankLocal.sort((a, b) => b.puntos - a.puntos || a.fecha - b.fecha);
+  const pos = rankLocal.indexOf(entry);
+  rankLocal = rankLocal.slice(0, 10);
+  lsSet(RANK_KEY, rankLocal);
+  return pos < 10 ? pos : -1;
+}
+
+// ---------- Supabase (API REST, sin librerías) ----------
+const Online = (() => {
+  const on = !!(SUPABASE_URL && SUPABASE_KEY);
+  const base = SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/ranking';
+  function headers(extra = {}) {
+    const h = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...extra };
+    // Las claves antiguas ("anon", tipo JWT) necesitan también Authorization
+    if (SUPABASE_KEY.startsWith('eyJ')) h.Authorization = 'Bearer ' + SUPABASE_KEY;
+    return h;
+  }
+  async function req(url, opts = {}) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(url, { ...opts, signal: ctrl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (await r.text()));
+      return r;
+    } finally { clearTimeout(t); }
+  }
+  return {
+    on,
+    async top() {
+      const r = await req(base + '?select=id,nombre,puntos,nivel&order=puntos.desc,creado.asc&limit=10', { headers: headers() });
+      return r.json();
+    },
+    async guardar(e) {
+      const r = await req(base, {
+        method: 'POST', headers: headers({ Prefer: 'return=representation' }),
+        body: JSON.stringify({ nombre: e.nombre, puntos: e.puntos, nivel: e.nivel }),
+      });
+      return (await r.json())[0];
+    },
+    async mejoresQue(puntos) { // cuántas puntuaciones hay por encima
+      const r = await req(base + '?select=id&limit=1&puntos=gt.' + puntos, { headers: headers({ Prefer: 'count=exact' }) });
+      const n = parseInt((r.headers.get('content-range') || '').split('/')[1], 10);
+      return isNaN(n) ? null : n;
+    },
+  };
+})();
+
+async function refreshOnline() {
+  if (!Online.on) return;
+  if (!rankOnline) netState = 'cargando';
+  try {
+    await flushPending();
+    rankOnline = await Online.top();
+    netState = 'ok';
+  } catch (e) {
+    console.warn('Ranking online no disponible:', e);
+    if (!rankOnline) netState = 'error';
+  }
+  best = bestScore();
+}
+
+// Partidas que no se pudieron subir (sin cobertura, etc.): se reintentan luego
+let flushing = false;
+async function flushPending() {
+  if (flushing) return;
+  const pend = lsGet(PEND_KEY, []);
+  if (!pend.length) return;
+  flushing = true;
+  const rest = [];
+  for (const e of pend) { try { await Online.guardar(e); } catch (err) { rest.push(e); } }
+  // conserva lo que se haya añadido mientras tanto
+  const nuevos = lsGet(PEND_KEY, []).slice(pend.length);
+  lsSet(PEND_KEY, rest.concat(nuevos));
+  flushing = false;
+}
+
+let gameId = 0;
+async function saveScore() {
+  const id = ++gameId;
+  game.rankPos = -1; game.globalPos = null; game.newRecord = false;
+  if (game.score <= 0) { game.saveState = 'nada'; return; }
+  const entry = { nombre: jugador, puntos: game.score, nivel: game.level, fecha: Date.now() };
+  const localPos = saveLocal(entry);
+  if (!Online.on) {
+    game.saveState = 'local'; game.rankPos = localPos; game.newRecord = localPos === 0;
+    best = bestScore();
+    return;
+  }
+  game.saveState = 'guardando';
+  try {
+    const row = await Online.guardar(entry);
+    const [top, mejores] = await Promise.all([Online.top(), Online.mejoresQue(entry.puntos)]);
+    rankOnline = top; netState = 'ok'; best = bestScore();
+    if (id !== gameId) return; // ya empezó otra partida
+    game.rankPos = top.findIndex(e => e.id === row.id);
+    game.globalPos = mejores == null ? (game.rankPos >= 0 ? game.rankPos + 1 : null) : mejores + 1;
+    game.newRecord = game.globalPos === 1;
+    game.saveState = 'ok';
+  } catch (e) {
+    console.warn('No se pudo guardar online:', e);
+    lsSet(PEND_KEY, lsGet(PEND_KEY, []).concat([entry]));
+    if (id !== gameId) return;
+    game.saveState = 'error';
+  }
+}
+refreshOnline();
+
+const game = {
+  mode: 'menu', // menu | name | playing | paused | gameover
+  score: 0, lives: 3, level: 1, expelled: 0, reds: 3,
+  spawnT: 1, shake: 0, hurt: 0, overT: 0, menuT: 0, newRecord: false, rankPos: -1,
+  saveState: 'nada', globalPos: null,
+};
+let bubble = null; // bocadillo con la protesta de la última cara expulsada
+let lastFrase = -1;
+const ref = { x: W / 2, speed: 430, walk: 0, moving: false, cool: 0, redCool: 0, throwT: 0, throwType: 'yellow' };
+let faces = [], cards = [], parts = [], texts = [], dying = [];
+let banner = null;
+
+function newGame() {
+  Object.assign(game, { mode: 'playing', score: 0, lives: 3, level: 1, expelled: 0, reds: 3, spawnT: 1.2, shake: 0, hurt: 0, newRecord: false });
+  faces = []; cards = []; parts = []; texts = []; dying = []; bubble = null;
+  ref.x = W / 2; ref.cool = 0; ref.redCool = 0; ref.throwT = 0;
+  Sound.init();
+  Sound.setTempo(140);
+  Sound.sfx.kickoff();
+  Sound.startMusic();
+  showBanner('¡A JUGAR!', '#fff');
+}
+
+function gameOver() {
+  game.mode = 'gameover';
+  game.overT = 1.4;
+  Sound.stopMusic();
+  Sound.sfx.finalWhistle();
+  saveScore();
+}
+
+function togglePause() {
+  if (game.mode === 'playing') { game.mode = 'paused'; Sound.suspend(); Voz.callar(); }
+  else if (game.mode === 'paused') { game.mode = 'playing'; Sound.resume(); }
+}
+
+// ---------- Pantalla de nombre ----------
+const nameBox = document.getElementById('nameBox');
+const nameForm = document.getElementById('nameForm');
+const nameInput = document.getElementById('nameInput');
+
+function openNameScreen() {
+  game.mode = 'name';
+  faces = []; dying = []; parts = []; texts = []; bubble = null;
+  nameInput.value = jugador;
+  nameInput.classList.remove('error');
+  nameBox.classList.add('show');
+  refreshOnline(); // por si otros han jugado mientras tanto
+  setTimeout(() => { nameInput.focus(); nameInput.select(); }, 30);
+}
+
+nameForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const n = nameInput.value.replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 12);
+  if (!n) {
+    nameInput.classList.remove('error'); void nameInput.offsetWidth;
+    nameInput.classList.add('error'); nameInput.focus();
+    return;
+  }
+  jugador = n;
+  try { localStorage.setItem('arbitro_jugador', n); } catch (err) {}
+  nameInput.blur();
+  nameBox.classList.remove('show');
+  newGame();
+});
+nameInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { nameBox.classList.remove('show'); game.mode = 'menu'; }
+});
+
+function tryStart() {
+  if (game.mode === 'menu' || (game.mode === 'gameover' && game.overT <= 0)) openNameScreen();
+  else if (game.mode === 'paused') togglePause();
+}
+
+function showBanner(text, color) { banner = { text, color, life: 1.6, max: 1.6 }; }
+
+function floatText(text, x, y, color, size = 14) {
+  texts.push({ text, x: clamp(x, 130, W - 130), y, color, size, life: 1.1, max: 1.1 });
+}
+
+function burst(x, y, colors, n, speed = 260) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), s = rand(speed * 0.3, speed);
+    parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: rand(0.4, 0.9), max: 0.9,
+      size: rand(3, 7), color: colors[Math.floor(Math.random() * colors.length)] });
+  }
+}
+
+// ---------- Caras ----------
+function procFace() {
+  const skins = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac', '#f3c6a5'];
+  const hairs = ['#2b1b0e', '#6b3e1f', '#d9a441', '#111111', '#9c2f1f', '#777777'];
+  return {
+    skin: skins[Math.floor(Math.random() * skins.length)],
+    hair: hairs[Math.floor(Math.random() * hairs.length)],
+    style: Math.floor(Math.random() * 3),
+    beard: Math.random() < 0.3,
+  };
+}
+
+function spawnFace() {
+  const r = rand(30, 44);
+  const wa = rand(0, 40);
+  const x0 = r + wa + Math.random() * (W - 2 * (r + wa));
+  const c = caras.length ? caras[Math.floor(Math.random() * caras.length)] : null;
+  faces.push({
+    x: x0, x0, y: -r, r, t: rand(0, 6), wa, wf: rand(1, 2.5),
+    vy: 55 + game.level * 10 + rand(0, 35),
+    rot: 0, rotSpeed: rand(-0.6, 0.6),
+    yellow: false, flash: 0, dead: false,
+    img: c ? c.img : null, nombre: c ? c.nombre : null, proc: c ? null : procFace(),
+  });
+}
+
+// ---------- Tarjetas ----------
+function throwCard(type) {
+  cards.push({ x: Math.min(ref.x + 22, W - 22), y: GROUND - 140, vy: type === 'red' ? -820 : -680, rot: 0,
+    spin: rand(10, 16) * (Math.random() < 0.5 ? -1 : 1), type, dead: false });
+  ref.throwT = 0.18; ref.throwType = type;
+  if (type === 'red') Sound.sfx.throwRed(); else Sound.sfx.throwYellow();
+}
+
+function tryRed() {
+  if (ref.redCool > 0) return;
+  if (game.reds <= 0) {
+    Sound.sfx.empty();
+    floatText('SIN ROJAS', ref.x, GROUND - 160, '#ff6b6b', 11);
+    ref.redCool = 0.3;
+    return;
+  }
+  game.reds--; ref.redCool = 0.35;
+  throwCard('red');
+}
+
+function expel(f, why) {
+  f.dead = true;
+  const pts = (why === 'red' ? 100 : 150) * game.level;
+  game.score += pts;
+  const label = f.nombre ? `¡FUERA, ${f.nombre.toUpperCase()}!` : (why === 'red' ? '¡ROJA DIRECTA!' : '¡DOBLE AMARILLA!');
+  const col = why === 'red' ? '#ff4d4d' : '#ffd60a';
+  floatText(label, f.x, f.y - 6, col, 13);
+  floatText('+' + pts, f.x, f.y + 20, '#fff', 11);
+  dying.push({ ...f, life: 0.6, vy: -220, vx: rand(-80, 80), spinD: rand(-10, 10), why });
+  burst(f.x, f.y, [col, '#ffffff', '#ffd60a', '#e3121b'], 36, 340);
+  game.shake = 8;
+  Sound.sfx.destroy();
+  protestar(f.x, f.y - f.r);
+
+  game.expelled++;
+  if (game.expelled % 6 === 0 && game.reds < 5) {
+    game.reds++;
+    floatText('+1 ROJA', ref.x, GROUND - 165, '#ff4d4d', 12);
+    Sound.sfx.redGain();
+  }
+  const lvl = 1 + Math.floor(game.expelled / 8);
+  if (lvl > game.level) {
+    game.level = lvl;
+    showBanner('NIVEL ' + lvl, '#ffd60a');
+    Sound.sfx.levelUp();
+    Sound.setTempo(Math.min(190, 140 + (lvl - 1) * 5));
+  }
+}
+
+function protestar(x, y) {
+  if (!FRASES.length) return;
+  let i = Math.floor(Math.random() * FRASES.length);
+  if (FRASES.length > 1 && i === lastFrase) i = (i + 1) % FRASES.length;
+  lastFrase = i;
+  const texto = FRASES[i].toUpperCase();
+  bubble = { text: texto, x, y: Math.max(HUD_H + 70, y - 34), life: 1.8, max: 1.8 };
+  Voz.decir(FRASES[i]);
+}
+
+function hitFace(f, c) {
+  if (c.type === 'red') { expel(f, 'red'); return; } // la roja atraviesa
+  c.dead = true;
+  if (f.yellow) { expel(f, 'double'); return; }
+  f.yellow = true; f.flash = 0.12;
+  const pts = 50 * game.level;
+  game.score += pts;
+  floatText('¡AMARILLA!', f.x, f.y - f.r - 8, '#ffd60a', 12);
+  burst(f.x, f.y, ['#ffd60a', '#fff'], 12, 200);
+  Sound.sfx.yellowHit();
+}
+
+function faceEscaped(f) {
+  f.dead = true;
+  game.lives--;
+  game.shake = 12; game.hurt = 0.35;
+  floatText('¡SE ESCAPÓ!', f.x, H - 70, '#ff4d4d', 13);
+  Sound.sfx.lifeLost();
+  if (game.lives <= 0) gameOver();
+}
+
+// =====================================================================
+//  ENTRADA
+// =====================================================================
+const keys = { left: false, right: false, yellow: false, redPressed: false };
+const KEYMAP = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  Space: 'yellow', KeyZ: 'yellow', KeyX: 'red', ArrowUp: 'red', KeyW: 'red', ShiftLeft: 'red', ShiftRight: 'red',
+};
+
+addEventListener('keydown', e => {
+  if (e.target === nameInput || game.mode === 'name') return; // escribiendo el nombre
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyM') { Sound.toggleMute(); if (Sound.muted) Voz.callar(); return; }
+  if (e.code === 'KeyP' || e.code === 'Escape') { togglePause(); return; }
+  if (game.mode !== 'playing') {
+    if (e.code === 'Space' || e.code === 'Enter') tryStart();
+    return;
+  }
+  const k = KEYMAP[e.code];
+  if (!k) return;
+  if (k === 'red') { if (!e.repeat) keys.redPressed = true; }
+  else keys[k] = true;
+});
+addEventListener('keyup', e => {
+  const k = KEYMAP[e.code];
+  if (k && k !== 'red') keys[k] = false;
+});
+addEventListener('blur', () => { keys.left = keys.right = keys.yellow = false; });
+document.addEventListener('visibilitychange', () => { if (document.hidden && game.mode === 'playing') togglePause(); });
+
+canvas.addEventListener('pointerdown', () => { if (game.mode !== 'playing') tryStart(); });
+
+if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) document.body.classList.add('touch');
+document.querySelectorAll('#touch button').forEach(b => {
+  const k = b.dataset.k;
+  const down = e => {
+    e.preventDefault(); b.classList.add('on');
+    if (k === 'pause') { togglePause(); return; }
+    if (game.mode !== 'playing') { tryStart(); return; }
+    if (k === 'red') keys.redPressed = true; else keys[k] = true;
+  };
+  const up = () => { b.classList.remove('on'); if (k !== 'red' && k !== 'pause') keys[k] = false; };
+  b.addEventListener('pointerdown', down);
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, up));
+});
+
+// =====================================================================
+//  ACTUALIZACIÓN
+// =====================================================================
+function updateFx(dt) {
+  for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt; p.life -= dt; }
+  parts = parts.filter(p => p.life > 0);
+  for (const t of texts) { t.y -= 40 * dt; t.life -= dt; }
+  texts = texts.filter(t => t.life > 0);
+  for (const d of dying) { d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 700 * dt; d.rot += d.spinD * dt; d.life -= dt; }
+  dying = dying.filter(d => d.life > 0);
+  if (banner) { banner.life -= dt; if (banner.life <= 0) banner = null; }
+  if (bubble) { bubble.life -= dt; bubble.y -= 12 * dt; if (bubble.life <= 0) bubble = null; }
+  game.shake = Math.max(0, game.shake - 40 * dt);
+  game.hurt = Math.max(0, game.hurt - dt);
+}
+
+function moveFaces(dt) {
+  for (const f of faces) {
+    f.t += dt;
+    f.y += f.vy * dt;
+    f.x = f.x0 + Math.sin(f.t * f.wf) * f.wa;
+    f.rot = Math.sin(f.t * 1.3) * 0.25 + f.rotSpeed * 0.2;
+    f.flash -= dt;
+  }
+}
+
+function update(dt) {
+  const dir = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  ref.moving = dir !== 0;
+  ref.x = clamp(ref.x + dir * ref.speed * dt, 32, W - 32);
+  if (ref.moving) ref.walk += dt * 14;
+  ref.cool -= dt; ref.redCool -= dt; ref.throwT -= dt;
+
+  if (keys.yellow && ref.cool <= 0) { throwCard('yellow'); ref.cool = 0.26; }
+  if (keys.redPressed) { keys.redPressed = false; tryRed(); }
+
+  game.spawnT -= dt;
+  if (game.spawnT <= 0) {
+    spawnFace();
+    game.spawnT = Math.max(0.38, 1.5 - game.level * 0.1) * rand(0.7, 1.3);
+  }
+
+  for (const c of cards) { c.y += c.vy * dt; c.rot += c.spin * dt; if (c.y < -30) c.dead = true; }
+  moveFaces(dt);
+
+  for (const c of cards) {
+    if (c.dead) continue;
+    for (const f of faces) {
+      if (f.dead) continue;
+      if (Math.hypot(c.x - f.x, c.y - f.y) < f.r + 12) {
+        hitFace(f, c);
+        if (c.dead) break;
+      }
+    }
+  }
+  for (const f of faces) if (!f.dead && f.y - f.r > H) faceEscaped(f);
+
+  cards = cards.filter(c => !c.dead);
+  faces = faces.filter(f => !f.dead);
+  updateFx(dt);
+}
+
+function updateMenu(dt) {
+  game.menuT += dt;
+  game.spawnT -= dt;
+  if (game.spawnT <= 0) { spawnFace(); game.spawnT = rand(0.8, 1.6); }
+  moveFaces(dt);
+  faces = faces.filter(f => f.y - f.r < H);
+  updateFx(dt);
+}
+
+// =====================================================================
+//  DIBUJO
+// =====================================================================
+const pitch = document.createElement('canvas');
+function buildPitch() {
+  pitch.width = W * 2; pitch.height = H * 2;
+  const p = pitch.getContext('2d');
+  p.scale(2, 2);
+  for (let i = 0, n = 0; i < H; i += 70, n++) {
+    p.fillStyle = n % 2 ? '#2f8f3f' : '#37a04a';
+    p.fillRect(0, i, W, 70);
+  }
+  p.strokeStyle = 'rgba(255,255,255,.75)'; p.lineWidth = 4;
+  p.strokeRect(14, -10, W - 28, H + 20);
+  p.beginPath(); p.moveTo(14, 250); p.lineTo(W - 14, 250); p.stroke();
+  p.beginPath(); p.arc(W / 2, 250, 80, 0, TAU); p.stroke();
+  p.fillStyle = 'rgba(255,255,255,.85)';
+  p.beginPath(); p.arc(W / 2, 250, 5, 0, TAU); p.fill();
+  p.strokeRect(W / 2 - 170, H - 170, 340, 190);
+  p.strokeRect(W / 2 - 80, H - 70, 160, 90);
+  p.beginPath(); p.arc(W / 2, H - 170, 60, Math.PI, TAU); p.stroke();
+}
+buildPitch();
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+function txt(s, x, y, size, color, align = 'center') {
+  ctx.font = `${size}px ${FONT}`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, size / 3.5);
+  ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y);
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+
+function drawProcFace(p, r) {
+  ctx.fillStyle = p.skin; ctx.fillRect(-r, -r, 2 * r, 2 * r);
+  ctx.fillStyle = p.hair;
+  if (p.style === 0) { ctx.beginPath(); ctx.ellipse(0, -r * 0.9, r * 1.05, r * 0.55, 0, 0, TAU); ctx.fill(); }
+  else if (p.style === 1) {
+    ctx.beginPath(); ctx.moveTo(-r, -r * 0.35);
+    for (let i = 0; i <= 6; i++) ctx.lineTo(-r + (i * 2 * r) / 6, i % 2 ? -r * 1.05 : -r * 0.55);
+    ctx.lineTo(r, -r * 0.35); ctx.lineTo(r, -r); ctx.lineTo(-r, -r); ctx.fill();
+  }
+  if (p.beard) { ctx.beginPath(); ctx.ellipse(0, r * 0.7, r * 0.75, r * 0.45, 0, 0, TAU); ctx.fill(); }
+  for (const s of [-1, 1]) {
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s * r * 0.35, -r * 0.1, r * 0.19, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(s * r * 0.33, -r * 0.08, r * 0.09, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#111'; ctx.lineWidth = r * 0.1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(s * r * 0.58, -r * 0.42); ctx.lineTo(s * r * 0.14, -r * 0.27); ctx.stroke();
+  }
+  ctx.fillStyle = '#5a1010';
+  ctx.beginPath(); ctx.ellipse(0, r * 0.42, r * 0.24, r * 0.17, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillRect(-r * 0.15, r * 0.27, r * 0.3, r * 0.07);
+}
+
+function drawFace(f, x, y, rot, alpha = 1, scale = 1) {
+  const r = f.r;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(scale, scale); ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.beginPath(); ctx.arc(4, 6, r + 3, 0, TAU); ctx.fill();
+  ctx.fillStyle = f.yellow ? '#ffd60a' : '#ffffff';
+  ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, TAU); ctx.fill();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.clip();
+  if (f.img) {
+    const iw = f.img.naturalWidth, ih = f.img.naturalHeight, s = Math.min(iw, ih);
+    ctx.drawImage(f.img, (iw - s) / 2, (ih - s) / 2, s, s, -r, -r, 2 * r, 2 * r);
+  } else drawProcFace(f.proc, r);
+  if (f.flash > 0) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillRect(-r, -r, 2 * r, 2 * r); }
+  ctx.restore();
+  ctx.restore();
+  if (f.yellow && alpha === 1) drawCard(x + r * 0.75, y - r * 0.75, 0.3, 'yellow', 0.8);
+}
+
+function drawCard(x, y, rot, type, scale = 1) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(scale, scale);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-6, -8, 16, 22);
+  ctx.fillStyle = type === 'red' ? '#e3121b' : '#ffd60a';
+  ctx.fillRect(-8, -11, 16, 22);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(-8, -11, 16, 22);
+  ctx.restore();
+}
+
+function limb(x1, y1, x2, y2, sleeve) {
+  ctx.lineCap = 'round';
+  const mx = x1 + (x2 - x1) * 0.4, my = y1 + (y2 - y1) * 0.4;
+  ctx.strokeStyle = SKIN; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.strokeStyle = sleeve; ctx.lineWidth = 12;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(mx, my); ctx.stroke();
+  ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(x2, y2, 5, 0, TAU); ctx.fill();
+}
+
+function drawRef() {
+  const s = ref.moving ? Math.sin(ref.walk) : 0;
+  ctx.save();
+  ctx.translate(ref.x, GROUND);
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.beginPath(); ctx.ellipse(0, 2, 30, 7, 0, 0, TAU); ctx.fill();
+  for (const side of [-1, 1]) {
+    const lift = Math.max(0, side * s) * 7, lx = side * 9;
+    ctx.fillStyle = SKIN; ctx.fillRect(lx - 5, -44 - lift, 10, 24);
+    ctx.fillStyle = '#111'; ctx.fillRect(lx - 5, -22 - lift, 10, 16);
+    ctx.fillStyle = '#ffd60a'; ctx.fillRect(lx - 5, -22 - lift, 10, 3);
+    ctx.fillStyle = '#000'; rr(lx - 7, -8 - lift, 14, 8, 3); ctx.fill();
+  }
+  ctx.fillStyle = '#151515'; rr(-18, -60, 36, 20, 4); ctx.fill();
+  ctx.fillStyle = '#1d1d1d'; rr(-21, -103, 42, 47, 9); ctx.fill();
+  ctx.fillStyle = '#ffd60a'; ctx.fillRect(-21, -62, 42, 3);
+  txt('R', 0, -82, 12, '#ffd60a');
+  limb(-17, -96, -27 - s * 4, -64, '#1d1d1d');
+  if (ref.throwT > 0) {
+    limb(17, -96, 28, -138, '#1d1d1d');
+    drawCard(30, -146, 0.2, ref.throwType, 0.9);
+  } else limb(17, -96, 27 + s * 4, -64, '#1d1d1d');
+  ctx.fillStyle = SKIN; ctx.fillRect(-6, -108, 12, 8);
+  ctx.beginPath(); ctx.arc(-15, -116, 4, 0, TAU); ctx.arc(15, -116, 4, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -118, 15, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2a1a0e';
+  ctx.beginPath(); ctx.arc(0, -120, 14.5, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, HUD_H);
+  ctx.fillStyle = '#ffd60a'; ctx.fillRect(0, HUD_H, W, 3);
+  txt(String(game.score).padStart(6, '0'), 16, 21, 14, '#fff', 'left');
+  txt(jugador, 16, 43, 8, '#ffd60a', 'left');
+  txt('NIVEL ' + game.level, W / 2, 21, 12, '#ffd60a');
+  txt(Sound.muted ? 'SIN SONIDO' : 'REC ' + Math.max(best, game.score), W / 2, 43, 8, '#aaa');
+  for (let i = 0; i < 3; i++) txt('♥', W - 22 - i * 24, 21, 16, i < game.lives ? '#ff4d4d' : '#444');
+  for (let i = 0; i < 5; i++) {
+    ctx.globalAlpha = i < game.reds ? 1 : 0.2;
+    drawCard(W - 20 - i * 18, 43, 0, 'red', 0.65);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawMenu() {
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, H);
+  const bob = Math.sin(game.menuT * 3) * 4;
+  const words = TITULO.split(' ');
+  words.forEach((w, i) => txt(w, W / 2, 110 + i * 46 + bob, 30, i % 2 ? '#e3121b' : '#ffd60a'));
+  drawCard(W / 2 - 150, 95 + bob, -0.3, 'yellow', 2);
+  drawCard(W / 2 + 150, 95 + bob, 0.3, 'red', 2);
+  const touch = document.body.classList.contains('touch');
+  const lines = touch ? [
+    ['◀ ▶  MOVERSE', '#fff'],
+    ['BOTÓN AMARILLO  AMARILLA', '#ffd60a'],
+    ['BOTÓN ROJO  ROJA DIRECTA', '#ff6b6b'],
+  ] : [
+    ['← → / A D   MOVERSE', '#fff'],
+    ['ESPACIO / Z   AMARILLA', '#ffd60a'],
+    ['X / ↑   ROJA DIRECTA', '#ff6b6b'],
+    ['M  MÚSICA    P  PAUSA', '#aaa'],
+  ];
+  lines.forEach(([l, c], i) => txt(l, W / 2, 270 + i * 34, 12, c));
+  txt('2 AMARILLAS = EXPULSIÓN', W / 2, 430, 11, '#fff');
+  txt('LAS ROJAS SON LIMITADAS', W / 2, 456, 11, '#fff');
+  txt('¡QUE NO SE ESCAPE NADIE!', W / 2, 482, 11, '#fff');
+  drawRanking(530, -1, 3, 11, 28);
+  if (Math.floor(game.menuT * 2) % 2 === 0)
+    txt(touch ? 'TOCA PARA EMPEZAR' : 'PULSA ESPACIO', W / 2, 690, 16, '#fff');
+}
+
+function drawRanking(y0, hl, max = 10, size = 12, lh = 32) {
+  const ranking = shownRanking();
+  txt(isOnlineRanking() ? 'RANKING GLOBAL' : 'RANKING', W / 2, y0, 14, '#ffd60a');
+  if (!ranking.length) {
+    const msg = netState === 'cargando' ? 'CARGANDO...' : 'TODAVÍA SIN PUNTUACIONES';
+    txt(msg, W / 2, y0 + lh + 4, 10, '#aaa');
+    return;
+  }
+  const blink = Math.floor(performance.now() / 300) % 2 === 0;
+  ranking.slice(0, max).forEach((e, i) => {
+    const y = y0 + lh + 6 + i * lh;
+    const me = i === hl;
+    if (me) {
+      ctx.fillStyle = blink ? 'rgba(255,214,10,.4)' : 'rgba(255,214,10,.2)';
+      rr(90, y - lh / 2 + 2, W - 180, lh - 4, 6); ctx.fill();
+    }
+    const col = me ? '#fff' : i === 0 ? '#ffd60a' : '#ddd';
+    txt((i + 1) + '.', 140, y, size, col, 'right');
+    txt(e.nombre, 156, y, size, col, 'left');
+    txt(String(e.puntos), W - 104, y, size, col, 'right');
+  });
+}
+
+function wrapText(s, maxW, size) {
+  ctx.font = `${size}px ${FONT}`;
+  const lines = []; let cur = '';
+  for (const w of s.split(' ')) {
+    const t = cur ? cur + ' ' + w : w;
+    if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = w; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function drawBubble(b) {
+  const size = 12, lh = 18, pad = 12;
+  const lines = wrapText(b.text, 220, size);
+  ctx.font = `${size}px ${FONT}`;
+  const tw = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const bw = tw + pad * 2, bh = lines.length * lh + pad * 2 - 4;
+  const age = b.max - b.life;
+  const pop = age < 0.15 ? 0.6 + (age / 0.15) * 0.4 : 1;
+  const tipX = b.x, tipY = b.y;
+  const bx = clamp(tipX - bw / 2, 8, W - 8 - bw), by = tipY - 14 - bh;
+  const tx = clamp(tipX, bx + 16, bx + bw - 16);
+  ctx.save();
+  ctx.globalAlpha = clamp(b.life / 0.3, 0, 1);
+  ctx.translate(tipX, tipY); ctx.scale(pop, pop); ctx.translate(-tipX, -tipY);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; rr(bx + 4, by + 4, bw, bh, 10); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  rr(bx, by, bw, bh, 10); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(tx - 9, by + bh - 1); ctx.lineTo(tipX, tipY); ctx.lineTo(tx + 9, by + bh - 1); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(tx - 9, by + bh); ctx.lineTo(tipX, tipY); ctx.lineTo(tx + 9, by + bh); ctx.stroke();
+  ctx.fillRect(tx - 7, by + bh - 3, 14, 4);
+  ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((l, i) => ctx.fillText(l, bx + bw / 2, by + pad + lh / 2 - 2 + i * lh));
+  ctx.restore();
+}
+
+function draw() {
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.save();
+  if (game.shake > 0) ctx.translate(rand(-1, 1) * game.shake, rand(-1, 1) * game.shake);
+  ctx.drawImage(pitch, 0, 0, W, H);
+
+  for (const f of faces) drawFace(f, f.x, f.y, f.rot);
+  for (const d of dying) {
+    const k = d.life / 0.6;
+    drawFace(d, d.x, d.y, d.rot, k, 0.5 + k * 0.6);
+    drawCard(d.x, d.y - d.r * k, d.rot * 0.3, 'red', 1.6 * k + 0.4);
+  }
+
+  if (game.mode === 'menu') { drawMenu(); ctx.restore(); return; }
+  if (game.mode === 'name') { ctx.restore(); return; } // el formulario va encima en HTML
+
+  for (const c of cards) {
+    if (c.type === 'red') {
+      ctx.globalAlpha = 0.25; drawCard(c.x, c.y + 24, c.rot - 0.6, 'red');
+      ctx.globalAlpha = 0.45; drawCard(c.x, c.y + 12, c.rot - 0.3, 'red');
+      ctx.globalAlpha = 1;
+    }
+    drawCard(c.x, c.y, c.rot, c.type, c.type === 'red' ? 1.15 : 1);
+  }
+  drawRef();
+  for (const p of parts) {
+    ctx.globalAlpha = clamp(p.life / p.max * 1.5, 0, 1);
+    ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+  for (const t of texts) {
+    ctx.globalAlpha = clamp(t.life / t.max * 2, 0, 1);
+    txt(t.text, t.x, t.y, t.size, t.color);
+  }
+  ctx.globalAlpha = 1;
+  if (bubble) drawBubble(bubble);
+  ctx.restore();
+
+  if (game.hurt > 0) { ctx.fillStyle = `rgba(255,0,0,${game.hurt * 0.6})`; ctx.fillRect(0, 0, W, H); }
+  drawHUD();
+
+  if (banner) {
+    const a = clamp(banner.life / banner.max * 2.5, 0, 1);
+    const sc = 1 + (1 - banner.life / banner.max) * 0.15;
+    ctx.globalAlpha = a;
+    txt(banner.text, W / 2, H * 0.42, Math.round(28 * sc), banner.color);
+    ctx.globalAlpha = 1;
+  }
+
+  if (game.mode === 'paused') {
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
+    txt('PAUSA', W / 2, H / 2 - 20, 28, '#fff');
+    txt('P PARA SEGUIR', W / 2, H / 2 + 28, 11, '#aaa');
+  }
+  if (game.mode === 'gameover') {
+    ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(0, 0, W, H);
+    txt('FINAL DEL PARTIDO', W / 2, 100, 22, '#fff');
+    txt(jugador, W / 2, 148, 14, '#ffd60a');
+    txt(game.score + ' PUNTOS', W / 2, 184, 20, '#fff');
+    txt(`EXPULSADOS ${game.expelled} - NIVEL ${game.level}`, W / 2, 218, 9, '#aaa');
+    const st = game.saveState;
+    if (st === 'nada') txt('SIN PUNTOS', W / 2, 254, 11, '#aaa');
+    else if (st === 'guardando') txt('GUARDANDO EN EL RANKING' + '...'.slice(0, 1 + Math.floor(performance.now() / 300) % 3), W / 2, 254, 11, '#aaa');
+    else if (st === 'error') {
+      txt('SIN CONEXIÓN: SE SUBIRÁ', W / 2, 248, 10, '#ff9f43');
+      txt('EN LA PRÓXIMA PARTIDA', W / 2, 266, 10, '#ff9f43');
+    }
+    else if (game.newRecord) txt('¡NUEVO RÉCORD!', W / 2, 254, 16, '#ff4d4d');
+    else if (st === 'ok' && game.globalPos) txt(`PUESTO ${game.globalPos} DEL RANKING`, W / 2, 254, 11, '#ffd60a');
+    else if (game.rankPos >= 0) txt(`PUESTO ${game.rankPos + 1} DEL RANKING`, W / 2, 254, 11, '#ffd60a');
+    else txt('FUERA DEL TOP 10', W / 2, 254, 11, '#aaa');
+    drawRanking(304, st === 'ok' || st === 'local' ? game.rankPos : -1);
+    if (game.overT <= 0 && Math.floor(performance.now() / 500) % 2 === 0) {
+      const touch = document.body.classList.contains('touch');
+      txt(touch ? 'TOCA PARA JUGAR OTRA' : 'ESPACIO PARA JUGAR OTRA', W / 2, 712, 12, '#fff');
+    }
+  }
+}
+
+// =====================================================================
+//  BUCLE Y TAMAÑO
+// =====================================================================
+function resize() {
+  const touchH = document.body.classList.contains('touch') ? 100 : 24;
+  const scale = Math.min(innerWidth / W, (innerHeight - touchH) / H);
+  canvas.style.width = Math.floor(W * scale) + 'px';
+  canvas.style.height = Math.floor(H * scale) + 'px';
+  K = Math.min(2.5, scale * (window.devicePixelRatio || 1));
+  canvas.width = Math.round(W * K);
+  canvas.height = Math.round(H * K);
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (game.mode === 'playing') update(dt);
+  else if (game.mode === 'menu' || game.mode === 'name') updateMenu(dt);
+  else if (game.mode === 'gameover') { updateFx(dt); game.overT -= dt; }
+  draw();
+  requestAnimationFrame(frame);
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => {});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
