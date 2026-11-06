@@ -11,7 +11,9 @@
   html, body {
     margin: 0; height: 100%; background: #0b1a10; overflow: hidden;
     touch-action: none; user-select: none; -webkit-user-select: none;
-    -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+    overscroll-behavior: none;
   }
   #wrap {
     height: 100%; display: flex; flex-direction: column;
@@ -366,9 +368,18 @@ const PEND_KEY = 'arbitro_pendientes';
 const lsGet = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
+// Ranking local: una sola entrada por nombre (su mejor marca)
+function dedupe(list) {
+  const mejor = new Map();
+  for (const e of list) {
+    const prev = mejor.get(e.nombre);
+    if (!prev || e.puntos > prev.puntos) mejor.set(e.nombre, e);
+  }
+  return [...mejor.values()].sort((a, b) => b.puntos - a.puntos || (a.fecha || 0) - (b.fecha || 0));
+}
 let rankLocal = lsGet(RANK_KEY, []);
 if (!Array.isArray(rankLocal)) rankLocal = [];
-rankLocal = rankLocal.filter(e => e && typeof e.nombre === 'string' && typeof e.puntos === 'number');
+rankLocal = dedupe(rankLocal.filter(e => e && typeof e.nombre === 'string' && typeof e.puntos === 'number'));
 
 let rankOnline = null;      // top 10 global (null = todavía no cargado)
 let netState = 'local';     // local | cargando | ok | error
@@ -380,19 +391,22 @@ let best = bestScore();
 let jugador = '';
 try { jugador = localStorage.getItem('arbitro_jugador') || ''; } catch (e) {}
 
+// Guarda solo si mejora la marca de ese nombre. Devuelve puesto, si mejoró y su mejor marca.
 function saveLocal(entry) {
-  rankLocal.push(entry);
-  rankLocal.sort((a, b) => b.puntos - a.puntos || a.fecha - b.fecha);
-  const pos = rankLocal.indexOf(entry);
-  rankLocal = rankLocal.slice(0, 10);
+  let mio = rankLocal.find(e => e.nombre === entry.nombre);
+  let improved = false;
+  if (!mio) { mio = { ...entry }; rankLocal.push(mio); improved = true; }
+  else if (entry.puntos > mio.puntos) { Object.assign(mio, entry); improved = true; }
+  rankLocal = dedupe(rankLocal).slice(0, 50);
   lsSet(RANK_KEY, rankLocal);
-  return pos < 10 ? pos : -1;
+  const pos = rankLocal.findIndex(e => e.nombre === entry.nombre);
+  return { pos, improved, best: mio.puntos };
 }
 
 // ---------- Supabase (API REST, sin librerías) ----------
 const Online = (() => {
   const on = !!(SUPABASE_URL && SUPABASE_KEY);
-  const base = SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/ranking';
+  const api = SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1';
   function headers(extra = {}) {
     const h = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...extra };
     // Las claves antiguas ("anon", tipo JWT) necesitan también Authorization
@@ -404,30 +418,35 @@ const Online = (() => {
     const t = setTimeout(() => ctrl.abort(), 8000);
     try {
       const r = await fetch(url, { ...opts, signal: ctrl.signal });
-      if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (await r.text()));
+      if (!r.ok) {
+        const err = new Error('HTTP ' + r.status + ': ' + (await r.text()));
+        err.status = r.status;
+        throw err;
+      }
       return r;
     } finally { clearTimeout(t); }
   }
   return {
     on,
     async top() {
-      const r = await req(base + '?select=id,nombre,puntos,nivel&order=puntos.desc,creado.asc&limit=10', { headers: headers() });
+      const r = await req(api + '/ranking?select=nombre,puntos,nivel&order=puntos.desc,creado.asc&limit=10', { headers: headers() });
       return r.json();
     },
+    // La base de datos solo actualiza la marca del jugador si la supera
     async guardar(e) {
-      const r = await req(base, {
-        method: 'POST', headers: headers({ Prefer: 'return=representation' }),
-        body: JSON.stringify({ nombre: e.nombre, puntos: e.puntos, nivel: e.nivel }),
+      const r = await req(api + '/rpc/guardar_puntuacion', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ p_nombre: e.nombre, p_puntos: e.puntos, p_nivel: e.nivel }),
       });
-      return (await r.json())[0];
-    },
-    async mejoresQue(puntos) { // cuántas puntuaciones hay por encima
-      const r = await req(base + '?select=id&limit=1&puntos=gt.' + puntos, { headers: headers({ Prefer: 'count=exact' }) });
-      const n = parseInt((r.headers.get('content-range') || '').split('/')[1], 10);
-      return isNaN(n) ? null : n;
+      const d = await r.json();
+      return Array.isArray(d) ? d[0] : d; // { mejor, mejorado, puesto }
     },
   };
 })();
+
+// Un fallo de red o del servidor se reintenta; si la base de datos rechaza la
+// puntuación (datos no válidos), no tiene sentido volver a enviarla.
+const reintentable = err => !err.status || err.status >= 500 || err.status === 408 || err.status === 429;
 
 async function refreshOnline() {
   if (!Online.on) return;
@@ -451,7 +470,10 @@ async function flushPending() {
   if (!pend.length) return;
   flushing = true;
   const rest = [];
-  for (const e of pend) { try { await Online.guardar(e); } catch (err) { rest.push(e); } }
+  for (const e of pend) {
+    try { await Online.guardar(e); }
+    catch (err) { if (reintentable(err)) rest.push(e); else console.warn('Puntuación descartada:', err); }
+  }
   // conserva lo que se haya añadido mientras tanto
   const nuevos = lsGet(PEND_KEY, []).slice(pend.length);
   lsSet(PEND_KEY, rest.concat(nuevos));
@@ -461,30 +483,36 @@ async function flushPending() {
 let gameId = 0;
 async function saveScore() {
   const id = ++gameId;
-  game.rankPos = -1; game.globalPos = null; game.newRecord = false;
+  Object.assign(game, { rankPos: -1, globalPos: null, newRecord: false, improved: false, personalBest: 0 });
   if (game.score <= 0) { game.saveState = 'nada'; return; }
   const entry = { nombre: jugador, puntos: game.score, nivel: game.level, fecha: Date.now() };
-  const localPos = saveLocal(entry);
+  const loc = saveLocal(entry);
   if (!Online.on) {
-    game.saveState = 'local'; game.rankPos = localPos; game.newRecord = localPos === 0;
+    Object.assign(game, {
+      saveState: 'local', rankPos: loc.pos < 10 ? loc.pos : -1, globalPos: loc.pos + 1,
+      improved: loc.improved, personalBest: loc.best, newRecord: loc.improved && loc.pos === 0,
+    });
     best = bestScore();
     return;
   }
   game.saveState = 'guardando';
   try {
-    const row = await Online.guardar(entry);
-    const [top, mejores] = await Promise.all([Online.top(), Online.mejoresQue(entry.puntos)]);
+    const res = await Online.guardar(entry);
+    const top = await Online.top();
     rankOnline = top; netState = 'ok'; best = bestScore();
     if (id !== gameId) return; // ya empezó otra partida
-    game.rankPos = top.findIndex(e => e.id === row.id);
-    game.globalPos = mejores == null ? (game.rankPos >= 0 ? game.rankPos + 1 : null) : mejores + 1;
-    game.newRecord = game.globalPos === 1;
+    Object.assign(game, {
+      improved: !!res.mejorado, personalBest: Number(res.mejor), globalPos: Number(res.puesto),
+      rankPos: top.findIndex(e => e.nombre === entry.nombre),
+    });
+    game.newRecord = game.improved && game.globalPos === 1;
     game.saveState = 'ok';
   } catch (e) {
     console.warn('No se pudo guardar online:', e);
-    lsSet(PEND_KEY, lsGet(PEND_KEY, []).concat([entry]));
+    const retry = reintentable(e);
+    if (retry) lsSet(PEND_KEY, lsGet(PEND_KEY, []).concat([entry]));
     if (id !== gameId) return;
-    game.saveState = 'error';
+    game.saveState = retry ? 'error' : 'rechazada';
   }
 }
 refreshOnline();
@@ -493,7 +521,7 @@ const game = {
   mode: 'menu', // menu | name | playing | paused | gameover
   score: 0, lives: 3, level: 1, expelled: 0, reds: 3,
   spawnT: 1, shake: 0, hurt: 0, overT: 0, menuT: 0, newRecord: false, rankPos: -1,
-  saveState: 'nada', globalPos: null,
+  saveState: 'nada', globalPos: null, improved: false, personalBest: 0,
 };
 let bubble = null; // bocadillo con la protesta de la última cara expulsada
 let lastFrase = -1;
@@ -686,7 +714,7 @@ function faceEscaped(f) {
 // =====================================================================
 //  ENTRADA
 // =====================================================================
-const keys = { left: false, right: false, yellow: false, redPressed: false };
+const keys = { left: false, right: false, yellow: false, yellowTap: false, redPressed: false };
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
   Space: 'yellow', KeyZ: 'yellow', KeyX: 'red', ArrowUp: 'red', KeyW: 'red', ShiftLeft: 'red', ShiftRight: 'red',
@@ -704,7 +732,7 @@ addEventListener('keydown', e => {
   const k = KEYMAP[e.code];
   if (!k) return;
   if (k === 'red') { if (!e.repeat) keys.redPressed = true; }
-  else keys[k] = true;
+  else { keys[k] = true; if (k === 'yellow' && !e.repeat) keys.yellowTap = true; }
 });
 addEventListener('keyup', e => {
   const k = KEYMAP[e.code];
@@ -715,6 +743,23 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && gam
 
 canvas.addEventListener('pointerdown', () => { if (game.mode !== 'playing') tryStart(); });
 
+// ---------- Evitar zoom accidental ----------
+// Safari en iPhone ignora "user-scalable=no", así que se bloquea a mano:
+// pellizco (gesture*/dos dedos), doble toque y Ctrl+rueda / pellizco en trackpad.
+['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
+  document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  // el formulario del nombre queda fuera para no estorbar al escribir
+  if (now - lastTouchEnd < 350 && !e.target.closest('form')) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', e => { if (!e.target.closest('form')) e.preventDefault(); });
+
 if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) document.body.classList.add('touch');
 document.querySelectorAll('#touch button').forEach(b => {
   const k = b.dataset.k;
@@ -723,6 +768,7 @@ document.querySelectorAll('#touch button').forEach(b => {
     if (k === 'pause') { togglePause(); return; }
     if (game.mode !== 'playing') { tryStart(); return; }
     if (k === 'red') keys.redPressed = true; else keys[k] = true;
+    if (k === 'yellow') keys.yellowTap = true; // que no se pierda un toque muy rápido
   };
   const up = () => { b.classList.remove('on'); if (k !== 'red' && k !== 'pause') keys[k] = false; };
   b.addEventListener('pointerdown', down);
@@ -762,7 +808,7 @@ function update(dt) {
   if (ref.moving) ref.walk += dt * 14;
   ref.cool -= dt; ref.redCool -= dt; ref.throwT -= dt;
 
-  if (keys.yellow && ref.cool <= 0) { throwCard('yellow'); ref.cool = 0.26; }
+  if ((keys.yellow || keys.yellowTap) && ref.cool <= 0) { throwCard('yellow'); ref.cool = 0.26; keys.yellowTap = false; }
   if (keys.redPressed) { keys.redPressed = false; tryRed(); }
 
   game.spawnT -= dt;
@@ -1097,10 +1143,18 @@ function draw() {
       txt('SIN CONEXIÓN: SE SUBIRÁ', W / 2, 248, 10, '#ff9f43');
       txt('EN LA PRÓXIMA PARTIDA', W / 2, 266, 10, '#ff9f43');
     }
+    else if (st === 'rechazada') txt('NO SE PUDO GUARDAR LA PUNTUACIÓN', W / 2, 254, 10, '#ff9f43');
     else if (game.newRecord) txt('¡NUEVO RÉCORD!', W / 2, 254, 16, '#ff4d4d');
-    else if (st === 'ok' && game.globalPos) txt(`PUESTO ${game.globalPos} DEL RANKING`, W / 2, 254, 11, '#ffd60a');
-    else if (game.rankPos >= 0) txt(`PUESTO ${game.rankPos + 1} DEL RANKING`, W / 2, 254, 11, '#ffd60a');
-    else txt('FUERA DEL TOP 10', W / 2, 254, 11, '#aaa');
+    else {
+      const puesto = game.globalPos ? `PUESTO ${game.globalPos} DEL RANKING` : '';
+      if (game.improved) {
+        txt('¡MEJORAS TU MARCA!', W / 2, 246, 12, '#ffd60a');
+        if (puesto) txt(puesto, W / 2, 268, 10, '#fff');
+      } else {
+        txt(`TU MEJOR MARCA: ${game.personalBest}`, W / 2, 246, 11, '#aaa');
+        if (puesto) txt(puesto, W / 2, 268, 10, '#aaa');
+      }
+    }
     drawRanking(304, st === 'ok' || st === 'local' ? game.rankPos : -1);
     if (game.overT <= 0 && Math.floor(performance.now() / 500) % 2 === 0) {
       const touch = document.body.classList.contains('touch');
